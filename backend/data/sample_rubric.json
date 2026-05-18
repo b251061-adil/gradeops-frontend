@@ -1,0 +1,32 @@
+[
+  {
+    "question": "Q1",
+    "topic": "Time Complexity",
+    "max_marks": 10,
+    "criteria": "Award full marks for correct Master Theorem application. Deduct 3 marks for missing edge cases."
+  },
+  {
+    "question": "Q2",
+    "topic": "Binary Search Tree",
+    "max_marks": 10,
+    "criteria": "Award 5 marks for correct BST traversal and 5 marks for correct node deletion reasoning."
+  },
+  {
+    "question": "Q3",
+    "topic": "Dynamic Programming",
+    "max_marks": 15,
+    "criteria": "Award 5 marks for correct subproblem identification, 5 for recurrence relation, 5 for final solution."
+  },
+  {
+    "question": "Q4",
+    "topic": "Graph Traversal",
+    "max_marks": 10,
+    "criteria": "Award full marks for correct BFS/DFS choice, edge-case handling, and traversal proof."
+  },
+  {
+    "question": "Q5",
+    "topic": "Bonus",
+    "max_marks": 5,
+    "criteria": "Award partial credit for a valid bonus insight and extra marks for strong justification."
+  }
+]

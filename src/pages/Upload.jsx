@@ -19,7 +19,7 @@ const RUBRIC_PLACEHOLDER = `[
 ]`;
 
 export default function Upload({ course, onNav }) {
-  const { showToast } = useApp();
+  const { gradeExam, showToast } = useApp();
   const [files, setFiles] = useState({});
   const [examTitle, setExamTitle] = useState('');
   const [totalMarks, setTotalMarks] = useState('');
@@ -34,10 +34,30 @@ export default function Upload({ course, onNav }) {
 
   async function handleSubmit() {
     if (!examTitle) { showToast('Enter an exam title', 'info'); return; }
+
+    let parsedRubric = [];
+    if (rubric) {
+      try {
+        parsedRubric = JSON.parse(rubric);
+      } catch {
+        showToast('Rubric JSON is invalid. Please fix the format and try again.', 'error');
+        return;
+      }
+    }
+
     setLoading(true);
-    await new Promise(r => setTimeout(r, 2200));
+    const payload = {
+      exam_title: examTitle,
+      total_marks: totalMarks ? Number(totalMarks) : undefined,
+      rubric: parsedRubric.length ? parsedRubric : undefined,
+    };
+
+    const response = await gradeExam(payload);
     setLoading(false);
-    showToast('Pipeline triggered — grading in progress!', 'success');
+
+    if (response?.submissions?.length) {
+      showToast('Pipeline completed — grading results are ready.', 'success');
+    }
     onNav('results');
   }
 

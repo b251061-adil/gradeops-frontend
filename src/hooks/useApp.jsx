@@ -1,4 +1,5 @@
 import { createContext, useContext, useState } from 'react';
+import axios from 'axios';
 import { SUBMISSIONS } from '../data/mockData';
 
 const AppContext = createContext(null);
@@ -13,6 +14,23 @@ export function AppProvider({ children }) {
   }
 
   function logout() { setUser(null); }
+
+  async function gradeExam(payload) {
+    try {
+      const res = await axios.post('http://localhost:8000/grade', payload, { timeout: 120000 });
+      if (res?.data?.submissions?.length) {
+        setSubmissions(res.data.submissions);
+        showToast('Pipeline completed. Results loaded.', 'success');
+      } else {
+        showToast('Pipeline completed, but no results were returned.', 'warning');
+      }
+      return res.data;
+    } catch (error) {
+      console.error('GradeOps backend error', error);
+      showToast('Backend unavailable — using local mock data.', 'danger');
+      return null;
+    }
+  }
 
   function approveSubmission(id) {
     setSubmissions(prev => prev.map(s => s.id === id ? { ...s, status: 'approved' } : s));
@@ -33,7 +51,7 @@ export function AppProvider({ children }) {
   }
 
   return (
-    <AppContext.Provider value={{ user, login, logout, submissions, approveSubmission, overrideSubmission, toast, showToast }}>
+    <AppContext.Provider value={{ user, login, logout, submissions, gradeExam, approveSubmission, overrideSubmission, toast, showToast }}>
       {children}
     </AppContext.Provider>
   );
