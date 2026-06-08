@@ -1,0 +1,64 @@
+{
+  "rubric_id": "MTH-101-A",
+  "course_id": "MTH101",
+  "exam_name": "Midterm Exam – Calculus I",
+  "total_points": 25.0,
+  "criteria": [
+    {
+      "name": "Problem 1",
+      "max_points": 10.0,
+      "description": "Evaluate the integral using correct method and show full working.",
+      "conditions": [
+        {
+          "condition_id": "P1_C1",
+          "description": "Correct integration method selected (IBP or substitution)",
+          "points": 3.0,
+          "is_partial_credit": false
+        },
+        {
+          "condition_id": "P1_C2",
+          "description": "Correct intermediate steps shown without arithmetic errors",
+          "points": 4.0,
+          "is_partial_credit": true
+        },
+        {
+          "condition_id": "P1_C3",
+          "description": "Correct final answer with constant of integration",
+          "points": 3.0,
+          "is_partial_credit": false
+        }
+      ]
+    },
+    {
+      "name": "Problem 2",
+      "max_points": 15.0,
+      "description": "Find and classify critical points of the given function.",
+      "conditions": [
+        {
+          "condition_id": "P2_C1",
+          "description": "Correct first derivative computed",
+          "points": 4.0,
+          "is_partial_credit": false
+        },
+        {
+          "condition_id": "P2_C2",
+          "description": "Critical points correctly identified by setting f'=0",
+          "points": 4.0,
+          "is_partial_credit": true
+        },
+        {
+          "condition_id": "P2_C3",
+          "description": "Second derivative test applied correctly",
+          "points": 4.0,
+          "is_partial_credit": true
+        },
+        {
+          "condition_id": "P2_C4",
+          "description": "Correct classification (min/max/saddle) with justification",
+          "points": 3.0,
+          "is_partial_credit": false
+        }
+      ]
+    }
+  ]
+}
