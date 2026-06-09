@@ -54,25 +54,42 @@ def _extract_with_nougat(images: list[Image.Image]) -> list[str]:
     Use facebook/nougat-base for LaTeX-rich academic documents.
     Best for typed or printed math-heavy exams.
 
-    Install: pip install nougat-ocr
+    Install: pip install nougat-ocr transformers torch
     """
     try:
-        from nougat import NougatModel  # type: ignore
-        from nougat.utils.dataset import ImageDataset  # type: ignore
+        from transformers import NougatProcessor, VisionEncoderDecoderModel  # type: ignore
         import torch
     except ImportError as e:
-        raise ImportError("Install nougat-ocr: pip install nougat-ocr") from e
+        raise ImportError(
+            "Install Nougat dependencies: pip install nougat-ocr transformers torch accelerate"
+        ) from e
 
-    model = NougatModel.from_pretrained("facebook/nougat-base")
-    model.eval()
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    # Load processor and model from HuggingFace
+    processor = NougatProcessor.from_pretrained("facebook/nougat-base")
+    model = VisionEncoderDecoderModel.from_pretrained("facebook/nougat-base")
     model = model.to(device)
+    model.eval()
 
     results = []
     for img in images:
-        inputs = model.prepare_input(img, random_padding=False)
-        outputs = model.inference(image_tensors=inputs.unsqueeze(0))
-        results.append(outputs["predictions"][0])
+        try:
+            # Process image and generate text
+            pixel_values = processor(img, return_tensors="pt").pixel_values.to(device)
+            with torch.no_grad():
+                outputs = model.generate(
+                    pixel_values,
+                    max_length=3000,
+                    early_stopping=True,
+                )
+            # Decode the generated tokens
+            text = processor.batch_decode(outputs, skip_special_tokens=True)[0]
+            results.append(text)
+        except Exception as e:
+            logger.warning("Nougat extraction failed for image: %s", e)
+            results.append("")
+    
     return results
 
 
