@@ -1,6 +1,8 @@
 [project]
 name = "gradeops"
 version = "1.0.0"
+description = "Agentic grading pipeline with human-in-the-loop review"
 
 [tool.vercel]
 entrypoint = "hitl_dashboard:app"
+

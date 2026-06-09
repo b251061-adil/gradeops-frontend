@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pip install -r requirements-api.txt --no-cache-dir",
+  "installCommand": "pip install --upgrade pip setuptools wheel",
+  "env": {
+    "PYTHONUNBUFFERED": "1"
+  }
+}
