@@ -1,7 +1,17 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "pip install -r requirements-api.txt --no-cache-dir",
-  "installCommand": "pip install --upgrade pip setuptools wheel",
+  "functions": {
+    "api/hitl.py": {
+      "maxDuration": 120,
+      "memory": 1024
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "api/hitl.py"
+    }
+  ],
   "env": {
     "PYTHONUNBUFFERED": "1"
   }

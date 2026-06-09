@@ -1,0 +1,8 @@
+# GradeOps API – Lightweight Dependencies (Vercel Deployment)
+# Excludes heavy ML packages (torch, transformers, nougat-ocr)
+
+pydantic>=2.0
+python-dotenv
+fastapi>=0.110
+uvicorn[standard]
+httpx
