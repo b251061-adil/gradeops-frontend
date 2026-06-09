@@ -1,12 +1,2 @@
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "gradeops"
-version = "1.0.0"
-description = "Agentic grading pipeline with human-in-the-loop review"
-requires-python = ">=3.9"
-
 [tool.vercel]
 entrypoint = "hitl_dashboard:app"
