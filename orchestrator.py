@@ -78,6 +78,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineOutput:
         submissions=submissions,
         backend=config.vlm_backend,
         max_workers=config.max_extract_workers,
+        rubric_criteria=rubric.criteria,  # Pass rubric criteria for intelligent matching
     )
     logger.info("Extracted: %d/%d submissions", len(extracted_list), len(submissions))
 

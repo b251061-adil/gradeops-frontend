@@ -292,14 +292,16 @@ def batch_extract(
     submissions: list[StudentSubmission],
     backend: VLMBackend = "auto",
     max_workers: int = 4,
+    rubric_criteria: list | None = None,
 ) -> list[ExtractedSubmission]:
     """
     Extract a batch of submissions in parallel using a thread pool.
 
     Args:
-        submissions:  List of ingested submissions.
-        backend:      VLM backend to use.
-        max_workers:  Thread pool size (GPU-bound: keep low).
+        submissions:      List of ingested submissions.
+        backend:          VLM backend to use.
+        max_workers:      Thread pool size (GPU-bound: keep low).
+        rubric_criteria:  Optional list of RubricCriterion for intelligent matching.
 
     Returns:
         List of ExtractedSubmission objects in the same order.
@@ -309,7 +311,7 @@ def batch_extract(
     results: dict[str, ExtractedSubmission] = {}
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {
-            pool.submit(extract_submission, sub, backend): sub.submission_id
+            pool.submit(extract_submission, sub, backend, rubric_criteria): sub.submission_id
             for sub in submissions
         }
         for future in as_completed(futures):
