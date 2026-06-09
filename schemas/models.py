@@ -91,6 +91,7 @@ class GradingResult(BaseModel):
     submission_id: str
     student_id: str
     rubric_id: str
+    exam_id: Optional[str] = None
     total_score: float
     max_score: float
     criterion_results: list[CriterionResult]

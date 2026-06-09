@@ -24,7 +24,7 @@ class PipelineConfig:
     rubric_json_path: str | Path         # instructor-provided JSON rubric
     exam_pdf_dir: str | Path             # directory of scanned PDFs
     exam_id: str                         # e.g. "MTH101-MIDTERM-2025"
-    vlm_backend: str = "auto"            # "nougat" | "qwen-vl" | "auto"
+    vlm_backend: str = "auto"            # "nougat" | "qwen-vl" | "openai" | "mock" | "auto"
     plagiarism_threshold: float = 0.82
     max_extract_workers: int = 4
 
@@ -87,7 +87,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineOutput:
     logger.info("STAGE 3a – Agentic LLM Cognitive Engine")
     logger.info("=" * 60)
 
-    grading_results = batch_evaluate(extracted_list, rubric)
+    grading_results = batch_evaluate(extracted_list, rubric, submissions=submissions)
     logger.info("Evaluated: %d submissions", len(grading_results))
 
     avg_score = (
@@ -160,7 +160,7 @@ if __name__ == "__main__":
     parser.add_argument("--rubric", required=True, help="Path to JSON rubric file")
     parser.add_argument("--pdfs", required=True, help="Directory of exam PDF scans")
     parser.add_argument("--exam-id", required=True, help="Exam identifier")
-    parser.add_argument("--backend", default="auto", choices=["nougat", "qwen-vl", "auto"])
+    parser.add_argument("--backend", default="auto", choices=["nougat", "qwen-vl", "openai", "mock", "auto"])
     parser.add_argument("--threshold", type=float, default=0.82)
     args = parser.parse_args()
 

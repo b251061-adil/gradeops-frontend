@@ -318,6 +318,7 @@ def build_grading_graph() -> Any:
 def evaluate_submission(
     extracted: ExtractedSubmission,
     rubric: GradingRubric,
+    exam_id: str | None = None,
 ) -> GradingResult:
     """
     Run the full agentic evaluation pipeline for one submission.
@@ -325,6 +326,7 @@ def evaluate_submission(
     Args:
         extracted:  Transcribed answers from Stage 2.
         rubric:     Validated rubric from Stage 1.
+        exam_id:    Optional exam identifier.
 
     Returns:
         GradingResult with AI-proposed scores and justifications.
@@ -350,6 +352,7 @@ def evaluate_submission(
         submission_id=extracted.submission_id,
         student_id=extracted.student_id,
         rubric_id=rubric.rubric_id,
+        exam_id=exam_id,
         total_score=final_state["total_score"],
         max_score=final_state["max_score"],
         criterion_results=criterion_results,
@@ -378,20 +381,27 @@ def batch_evaluate(
     Returns:
         List of GradingResult objects (one per successfully evaluated submission).
     """
-    # Build a lookup so we can update status without a second loop
-    sub_map: dict[str, StudentSubmission] = {}
-    if submissions:
-        sub_map = {s.submission_id: s for s in submissions}
-
     results = []
+    submission_map = {}
+    if submissions:
+        submission_map = {s.submission_id: s for s in submissions}
+
     for extracted in extracted_list:
         try:
-            result = evaluate_submission(extracted, rubric)
+            exam_id = None
+            if extracted.submission_id in submission_map:
+                exam_id = submission_map[extracted.submission_id].exam_id
+
+            result = evaluate_submission(extracted, rubric, exam_id=exam_id)
             results.append(result)
 
             # Update submission status if caller provided the original objects
-            if extracted.submission_id in sub_map:
-                sub_map[extracted.submission_id].status = "evaluated"
+            if extracted.submission_id in submission_map:
+                submission_map[extracted.submission_id].status = "evaluated"
+                logger.info(
+                    "Updated status: %s → evaluated",
+                    extracted.submission_id,
+                )
 
             logger.info(
                 "Evaluated %s: %.1f/%.1f",

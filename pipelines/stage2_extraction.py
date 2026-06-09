@@ -19,7 +19,7 @@ from schemas.models import ExtractedAnswer, ExtractedSubmission, StudentSubmissi
 
 logger = logging.getLogger(__name__)
 
-VLMBackend = Literal["nougat", "qwen-vl", "auto"]
+VLMBackend = Literal["nougat", "qwen-vl", "openai", "mock", "auto"]
 
 
 # ─── Criterion Matching ────────────────────────────────────────────────────────
@@ -144,26 +144,117 @@ def _extract_with_nougat(images: list[Image.Image]) -> list[str]:
     Use facebook/nougat-base for LaTeX-rich academic documents.
     Best for typed or printed math-heavy exams.
 
-    Install: pip install nougat-ocr
+    Uses Hugging Face Transformers to avoid deprecated/broken nougat library imports.
     """
     try:
-        from nougat import NougatModel  # type: ignore
+        from transformers import NougatProcessor, VisionEncoderDecoderModel  # type: ignore
+        import torch
     except ImportError as e:
-        raise ImportError("Install nougat-ocr: pip install nougat-ocr") from e
+        raise ImportError(
+            "Install Nougat dependencies: pip install transformers torch accelerate"
+        ) from e
 
-    model = NougatModel.from_pretrained("facebook/nougat-base")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    try:
+        processor = NougatProcessor.from_pretrained("facebook/nougat-base")
+        model = VisionEncoderDecoderModel.from_pretrained("facebook/nougat-base")
+        model = model.to(device)
+        model.eval()
+    except Exception as e:
+        logger.error("Failed to load Nougat model: %s", e)
+        return [""] * len(images)
 
     results = []
     for img in images:
         try:
-            # predict() returns a string with the extracted text
-            text = model.predict(img)
+            pixel_values = processor(img, return_tensors="pt").pixel_values.to(device)
+            with torch.no_grad():
+                outputs = model.generate(
+                    pixel_values,
+                    max_length=3000,
+                    early_stopping=True,
+                )
+            text = processor.batch_decode(outputs, skip_special_tokens=True)[0]
             results.append(text)
         except Exception as e:
             logger.warning("Nougat extraction failed for image: %s", e)
             results.append("")
     
     return results
+
+
+def _extract_with_openai(images: list[Image.Image]) -> list[str]:
+    """
+    Use gpt-4o via OpenAI API to transcribe handwritten text and math.
+    """
+    import base64
+    from io import BytesIO
+    try:
+        from langchain_core.messages import HumanMessage
+        from langchain_openai import ChatOpenAI
+    except ImportError as e:
+        raise ImportError(
+            "Install OpenAI dependencies: pip install langchain-openai langchain"
+        ) from e
+
+    llm = ChatOpenAI(model="gpt-4o", temperature=0.0)
+    results = []
+
+    for i, img in enumerate(images):
+        logger.info("Sending page %d to OpenAI VLM...", i + 1)
+        # Convert PIL Image to base64 bytes
+        buffered = BytesIO()
+        img.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+        prompt = (
+            "Transcribe ALL handwritten text and mathematical expressions "
+            "exactly as written on this exam page. Use LaTeX for equations. "
+            "Preserve step numbering and structure. Return only the transcription."
+        )
+        message = HumanMessage(
+            content=[
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{img_str}"},
+                },
+            ]
+        )
+        try:
+            response = llm.invoke([message])
+            results.append(str(response.content))
+        except Exception as e:
+            logger.warning("OpenAI VLM extraction failed for page %d: %s", i + 1, e)
+            results.append("")
+    return results
+
+
+def _extract_mock(images: list[Image.Image]) -> list[str]:
+    """
+    Return mocked transcribed text for testing the pipeline stages.
+    """
+    mock_responses = [
+        # Page 1 / Criterion 1 (Problem 1)
+        "Problem 1: To evaluate the integral of x * ln(x) dx, we use integration by parts (IBP).\n"
+        "Let u = ln(x) => du = 1/x dx.\n"
+        "Let dv = x dx => v = x^2 / 2.\n"
+        "Then integral = u*v - integral(v * du) = (ln(x) * x^2)/2 - integral(x^2/2 * 1/x dx)\n"
+        "= (x^2 * ln(x))/2 - 1/2 * integral(x dx) = (x^2 * ln(x))/2 - x^2/4 + C.\n"
+        "The final answer is (x^2 * ln(x))/2 - x^2/4 + C.",
+        # Page 2 / Criterion 2 (Problem 2)
+        "Problem 2: Find critical points of f(x) = x^3 - 3x^2 - 9x + 5.\n"
+        "First, compute first derivative: f'(x) = 3x^2 - 6x - 9.\n"
+        "Set f'(x) = 0 => 3(x^2 - 2x - 3) = 0 => 3(x - 3)(x + 1) = 0.\n"
+        "Critical points are x = 3 and x = -1.\n"
+        "Now compute second derivative: f''(x) = 6x - 6.\n"
+        "For x = 3: f''(3) = 6(3) - 6 = 12 > 0 => local minimum.\n"
+        "For x = -1: f''(-1) = 6(-1) - 6 = -12 < 0 => local maximum.\n"
+        "So local minimum at x=3, local maximum at x=-1."
+    ]
+    # If there are more pages than mock_responses, cycle or append empty string
+    return [mock_responses[i % len(mock_responses)] for i in range(len(images))]
 
 
 # ─── Qwen-VL Backend ─────────────────────────────────────────────────────────
@@ -247,6 +338,12 @@ def extract_submission(
     if backend == "nougat":
         raw_texts = _extract_with_nougat(images)
         model_name = "facebook/nougat-base"
+    elif backend == "openai":
+        raw_texts = _extract_with_openai(images)
+        model_name = "gpt-4o"
+    elif backend == "mock":
+        raw_texts = _extract_mock(images)
+        model_name = "MockVLM"
     else:
         raw_texts = _extract_with_qwen_vl(images)
         model_name = "Qwen/Qwen-VL-Chat"
@@ -309,6 +406,8 @@ def batch_extract(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     results: dict[str, ExtractedSubmission] = {}
+    sub_map = {sub.submission_id: sub for sub in submissions}
+    
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {
             pool.submit(extract_submission, sub, backend, rubric_criteria): sub.submission_id
@@ -318,6 +417,9 @@ def batch_extract(
             sid = futures[future]
             try:
                 results[sid] = future.result()
+                if sid in sub_map:
+                    sub_map[sid].status = "extracted"
+                    logger.info("Updated status: %s → extracted", sid)
                 logger.info("Extracted: %s ✓", sid)
             except Exception as exc:
                 logger.error("Extraction failed for %s: %s", sid, exc)

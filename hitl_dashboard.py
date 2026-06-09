@@ -70,6 +70,8 @@ def get_review_queue(
         r for r in _grading_results.values()
         if r.status == "proposed"
     ]
+    if exam_id:
+        pending = [r for r in pending if r.exam_id == exam_id]
     if flagged_only:
         pending = [r for r in pending if r.plagiarism_flag]
     # Sort: flagged first, then by submission ID for determinism
