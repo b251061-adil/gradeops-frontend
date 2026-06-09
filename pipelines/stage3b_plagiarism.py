@@ -1,7 +1,7 @@
 """
-GradeOps – Pipeline Stage 3b: Structural Plagiarism Detection
+GradeOps - Pipeline Stage 3b: Structural Plagiarism Detection
 Maps the underlying reasoning architecture of every answer and flags
-highly similar logic structures across submissions – catching collusion
+highly similar logic structures across submissions - catching collusion
 even when exact phrasing and handwriting differ.
 """
 
@@ -10,18 +10,25 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from itertools import combinations
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from schemas.models import ExtractedSubmission
 
 logger = logging.getLogger(__name__)
 
-SIMILARITY_THRESHOLD = 0.82   # flag pairs above this cosine-like score
+SIMILARITY_THRESHOLD = 0.82   # flag pairs above this score
 MIN_CLUSTER_SIZE = 2           # minimum submissions in a plagiarism cluster
 
 
@@ -31,9 +38,9 @@ MIN_CLUSTER_SIZE = 2           # minimum submissions in a plagiarism cluster
 class LogicNode:
     """A single reasoning step extracted from a student answer."""
     step_id: str
-    description: str          # normalised description of the step
-    operation: str            # e.g. "differentiate", "substitute", "conclude"
-    operands: list[str]       # symbols/variables involved
+    description: str
+    operation: str        # e.g. "differentiate", "substitute", "conclude"
+    operands: list[str]   # generic symbols e.g. ["f", "x"]
 
 
 @dataclass
@@ -49,25 +56,26 @@ class LogicGraph:
         Produce a canonical fingerprint of the logic structure.
         Invariant to variable names and surface phrasing.
         """
-        # Sorted sequence of (operation, arity) tuples
+        node_map = {node.step_id: node.operation for node in self.nodes}
         structure = sorted(
             (node.operation, len(node.operands)) for node in self.nodes
         )
         edge_structure = sorted(
-            (self.nodes[int(u.split("_")[-1])].operation,
-             self.nodes[int(v.split("_")[-1])].operation)
+            (node_map[u], node_map[v])
             for u, v in self.edges
-            if u.split("_")[-1].isdigit() and v.split("_")[-1].isdigit()
+            if u in node_map and v in node_map
         ) if self.edges else []
-        payload = json.dumps({"nodes": structure, "edges": edge_structure}, sort_keys=True)
+        payload = json.dumps(
+            {"nodes": structure, "edges": edge_structure}, sort_keys=True
+        )
         return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
 # ─── LLM-based Logic Extraction ───────────────────────────────────────────────
 
-EXTRACTION_SYSTEM = """You extract the logical reasoning structure from a student's 
-mathematical or written answer. Focus on WHAT operations are performed and in 
-WHAT ORDER – not the specific numbers or variable names used."""
+EXTRACTION_SYSTEM = """You extract the logical reasoning structure from a student's
+mathematical or written answer. Focus on WHAT operations are performed and in
+WHAT ORDER - not the specific numbers or variable names used."""
 
 EXTRACTION_TEMPLATE = """Extract the logic graph from this student answer for: {criterion}
 
@@ -88,6 +96,41 @@ Operands should be generic symbols: f, g, x, y, expr_A, etc.
 """
 
 
+# ─── Retry-wrapped LLM call ───────────────────────────────────────────────────
+
+@retry(
+    wait=wait_exponential(multiplier=1, min=2, max=60),
+    stop=stop_after_attempt(3),
+    retry=retry_if_exception_type(Exception),
+    reraise=True,
+)
+def _invoke_llm(llm: ChatOpenAI, messages: list) -> Any:
+    """LLM call with automatic exponential-backoff retry (up to 3 attempts)."""
+    return llm.invoke(messages)
+
+
+def _parse_logic_graph_response(content: Any) -> tuple[list[LogicNode], list[tuple[str, str]]]:
+    """Parse the LLM response, accepting raw JSON or fenced JSON."""
+    if not isinstance(content, str):
+        raise TypeError("LLM response content must be a string")
+
+    cleaned = content.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if lines and lines[0].lstrip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
+
+    data = json.loads(cleaned)
+    nodes = [LogicNode(**n) for n in data.get("nodes", [])]
+    edges = [tuple(e) for e in data.get("edges", [])]
+    return nodes, edges
+
+
+# ─── Logic Graph Extraction ───────────────────────────────────────────────────
+
 def extract_logic_graph(
     submission_id: str,
     criterion_name: str,
@@ -96,6 +139,7 @@ def extract_logic_graph(
 ) -> LogicGraph:
     """
     Use an LLM to extract the underlying reasoning graph from a student answer.
+    Returns an empty LogicGraph (not a crash) if the LLM call or parse fails.
 
     Args:
         submission_id:  Submission identifier.
@@ -114,14 +158,28 @@ def extract_logic_graph(
         answer=answer_text,
     )
     messages = [SystemMessage(content=EXTRACTION_SYSTEM), HumanMessage(content=prompt)]
-    response = llm.invoke(messages)
 
+    # ── LLM call with retry ───────────────────────────────────────────────────
     try:
-        data = json.loads(response.content)
-        nodes = [LogicNode(**n) for n in data.get("nodes", [])]
-        edges = [tuple(e) for e in data.get("edges", [])]
-    except (json.JSONDecodeError, TypeError):
-        logger.warning("Failed to parse logic graph for %s – using empty graph", submission_id)
+        response = _invoke_llm(llm, messages)
+    except Exception as exc:
+        logger.error(
+            "Logic graph LLM call failed for %s / '%s' after all retries: %s",
+            submission_id, criterion_name, exc,
+        )
+        return LogicGraph(
+            submission_id=submission_id,
+            criterion_name=criterion_name,
+        )
+
+    # ── JSON parse with graceful fallback ─────────────────────────────────────
+    try:
+        nodes, edges = _parse_logic_graph_response(response.content)
+    except (json.JSONDecodeError, TypeError, KeyError, ValueError) as exc:
+        logger.warning(
+            "Failed to parse logic graph for %s / '%s': %s | raw=%r",
+            submission_id, criterion_name, exc, response.content[:200],
+        )
         nodes, edges = [], []
 
     return LogicGraph(
@@ -132,36 +190,30 @@ def extract_logic_graph(
     )
 
 
-# ─── Similarity Scoring ────────────────────────────────────────────────────────
+# ─── Similarity Scoring ───────────────────────────────────────────────────────
 
 def _jaccard_similarity(g1: LogicGraph, g2: LogicGraph) -> float:
     """
-    Compute structural similarity between two logic graphs using
-    Jaccard similarity on their (operation, arity) node multisets.
+    Compute structural similarity using Jaccard on (operation, arity) node multisets.
     """
-    ops1 = [(n.operation, len(n.operands)) for n in g1.nodes]
-    ops2 = [(n.operation, len(n.operands)) for n in g2.nodes]
+    ops1 = Counter((n.operation, len(n.operands)) for n in g1.nodes)
+    ops2 = Counter((n.operation, len(n.operands)) for n in g2.nodes)
 
-    set1, set2 = set(ops1), set(ops2)
-    if not set1 and not set2:
-        return 1.0  # both empty → identical
-    if not set1 or not set2:
+    if not ops1 or not ops2:
         return 0.0
 
-    intersection = len(set1 & set2)
-    union = len(set1 | set2)
+    intersection = sum((ops1 & ops2).values())
+    union = sum((ops1 | ops2).values())
     return intersection / union
 
 
 def _edge_similarity(g1: LogicGraph, g2: LogicGraph) -> float:
-    """Compare edge patterns (transition sequences)."""
+    """Compare edge patterns (operation-transition sequences)."""
     def edge_ops(g: LogicGraph) -> set[tuple[str, str]]:
         node_map = {n.step_id: n.operation for n in g.nodes}
         return {(node_map.get(u, u), node_map.get(v, v)) for u, v in g.edges}
 
     e1, e2 = edge_ops(g1), edge_ops(g2)
-    if not e1 and not e2:
-        return 1.0
     if not e1 or not e2:
         return 0.0
     return len(e1 & e2) / len(e1 | e2)
@@ -170,7 +222,7 @@ def _edge_similarity(g1: LogicGraph, g2: LogicGraph) -> float:
 def compute_structural_similarity(g1: LogicGraph, g2: LogicGraph) -> float:
     """
     Combined structural similarity score [0, 1].
-    Weights node similarity higher than edge similarity.
+    Node similarity weighted 65%, edge similarity 35%.
     """
     node_sim = _jaccard_similarity(g1, g2)
     edge_sim = _edge_similarity(g1, g2)
@@ -184,8 +236,8 @@ class PlagiarismAlert:
     """A detected cluster of suspiciously similar submissions."""
     criterion_name: str
     submission_ids: list[str]
-    similarity_scores: dict[str, float]   # "sid_a:sid_b" → score
-    fingerprints: dict[str, str]           # submission_id → logic fingerprint
+    similarity_scores: dict[str, float]   # "sid_a:sid_b" -> score
+    fingerprints: dict[str, str]           # submission_id -> logic fingerprint
 
 
 def detect_plagiarism(
@@ -197,9 +249,10 @@ def detect_plagiarism(
 
     Algorithm:
     1. Extract logic graphs for every (submission, criterion) pair.
+       Failures are silently skipped (empty graphs) rather than crashing.
     2. Compare all pairs per criterion using structural similarity.
-    3. Cluster submissions that exceed the similarity threshold.
-    4. Return PlagiarismAlerts for clusters with ≥2 members.
+    3. Cluster submissions exceeding the similarity threshold via BFS.
+    4. Return PlagiarismAlerts for clusters with at least MIN_CLUSTER_SIZE members.
 
     Args:
         submissions: All extracted submissions in the exam batch.
@@ -218,22 +271,32 @@ def detect_plagiarism(
             criterion_names.add(ans.criterion_name)
 
     for criterion in criterion_names:
-        # Extract logic graphs for this criterion
         graphs: dict[str, LogicGraph] = {}
+
         for sub in submissions:
             answer_text = next(
-                (a.raw_text for a in sub.answers if a.criterion_name == criterion), ""
+                (a.raw_text for a in sub.answers if a.criterion_name == criterion),
+                "",
             )
             if not answer_text.strip():
                 continue
+
+            # extract_logic_graph() now returns empty graph on failure
+            # instead of raising, so this loop never crashes
             graphs[sub.submission_id] = extract_logic_graph(
                 sub.submission_id, criterion, answer_text, llm
             )
+            if not graphs[sub.submission_id].nodes:
+                logger.warning(
+                    "Skipping empty logic graph for %s / '%s'",
+                    sub.submission_id, criterion,
+                )
+                del graphs[sub.submission_id]
 
         if len(graphs) < 2:
             continue
 
-        # Pairwise similarity
+        # ── Pairwise similarity ───────────────────────────────────────────────
         similarity_scores: dict[str, float] = {}
         flagged: set[str] = set()
         adjacency: dict[str, set[str]] = defaultdict(set)
@@ -249,11 +312,11 @@ def detect_plagiarism(
                 adjacency[sid_a].add(sid_b)
                 adjacency[sid_b].add(sid_a)
                 logger.warning(
-                    "Plagiarism flag [%s] %s ↔ %s (score=%.3f)",
+                    "Plagiarism flag [%s] %s <-> %s (score=%.3f)",
                     criterion, sid_a[:8], sid_b[:8], score,
                 )
 
-        # Build clusters via BFS
+        # ── BFS clustering ────────────────────────────────────────────────────
         visited: set[str] = set()
         for start in flagged:
             if start in visited:
@@ -271,7 +334,7 @@ def detect_plagiarism(
             if len(cluster) >= MIN_CLUSTER_SIZE:
                 cluster_scores = {
                     k: v for k, v in similarity_scores.items()
-                    if any(sid in k for sid in cluster)
+                    if all(sid in cluster for sid in k.split(":", 1))
                 }
                 fingerprints = {sid: graphs[sid].fingerprint() for sid in cluster}
                 alerts.append(PlagiarismAlert(
@@ -289,7 +352,7 @@ def detect_plagiarism(
 
 
 def apply_plagiarism_flags(
-    grading_results: list,          # list[GradingResult]
+    grading_results: list,
     alerts: list[PlagiarismAlert],
 ) -> list:
     """
