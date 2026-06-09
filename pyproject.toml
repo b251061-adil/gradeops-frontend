@@ -1,5 +1,6 @@
 [project]
 name = "gradeops"
+version = "1.0.0"
 
 [tool.vercel]
 entrypoint = "hitl_dashboard:app"
