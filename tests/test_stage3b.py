@@ -98,24 +98,27 @@ def test_detect_plagiarism(mock_chat_class):
     # Sub A and Sub B are structurally identical
     resp_a = MagicMock(content=json.dumps({
         "nodes": [
-            {"step_id": "s0", "description": "diff", "operation": "differentiate", "operands": ["x"]}
+            {"step_id": "s0", "description": "diff", "operation": "differentiate", "operands": ["x"]},
+            {"step_id": "s1", "description": "solve", "operation": "solve", "operands": ["y"]}
         ],
-        "edges": []
+        "edges": [["s0", "s1"]]
     }))
     
     resp_b = MagicMock(content=json.dumps({
         "nodes": [
-            {"step_id": "s0", "description": "diff", "operation": "differentiate", "operands": ["a"]}
+            {"step_id": "s0", "description": "diff", "operation": "differentiate", "operands": ["a"]},
+            {"step_id": "s1", "description": "solve", "operation": "solve", "operands": ["b"]}
         ],
-        "edges": []
+        "edges": [["s0", "s1"]]
     }))
     
     # Sub C is different
     resp_c = MagicMock(content=json.dumps({
         "nodes": [
-            {"step_id": "s0", "description": "int", "operation": "integrate", "operands": ["y"]}
+            {"step_id": "s0", "description": "int", "operation": "integrate", "operands": ["y"]},
+            {"step_id": "s1", "description": "solve", "operation": "solve", "operands": ["z"]}
         ],
-        "edges": []
+        "edges": [["s0", "s1"]]
     }))
 
     mock_llm.invoke.side_effect = [resp_a, resp_b, resp_c]
