@@ -159,14 +159,17 @@ def grade_next_criterion(state: GradingState) -> GradingState:
 
     criterion = rubric.criteria[idx]
 
-    # Match answer to criterion by page order (can be improved with a retriever)
+    # Match answer to criterion by name (robust to out-of-order answers)
     answer_text = ""
-    if idx < len(state["answers"]):
-        answer_text = state["answers"][idx].get("raw_text", "")
+    for answer_dict in state["answers"]:
+        if answer_dict.get("criterion_name") == criterion.name:
+            answer_text = answer_dict.get("raw_text", "")
+            break
 
     logger.info(
-        "Grading criterion %d/%d: %s",
+        "Grading criterion %d/%d: %s (found answer: %s)",
         idx + 1, len(rubric.criteria), criterion.name,
+        "yes" if answer_text else "no (empty or not provided)",
     )
 
     result = _evaluate_criterion(llm, criterion, answer_text)
