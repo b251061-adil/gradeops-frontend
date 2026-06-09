@@ -54,37 +54,20 @@ def _extract_with_nougat(images: list[Image.Image]) -> list[str]:
     Use facebook/nougat-base for LaTeX-rich academic documents.
     Best for typed or printed math-heavy exams.
 
-    Install: pip install nougat-ocr transformers torch
+    Install: pip install nougat-ocr
     """
     try:
-        from transformers import NougatProcessor, VisionEncoderDecoderModel  # type: ignore
-        import torch
+        from nougat import NougatModel  # type: ignore
     except ImportError as e:
-        raise ImportError(
-            "Install Nougat dependencies: pip install nougat-ocr transformers torch accelerate"
-        ) from e
+        raise ImportError("Install nougat-ocr: pip install nougat-ocr") from e
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    
-    # Load processor and model from HuggingFace
-    processor = NougatProcessor.from_pretrained("facebook/nougat-base")
-    model = VisionEncoderDecoderModel.from_pretrained("facebook/nougat-base")
-    model = model.to(device)
-    model.eval()
+    model = NougatModel.from_pretrained("facebook/nougat-base")
 
     results = []
     for img in images:
         try:
-            # Process image and generate text
-            pixel_values = processor(img, return_tensors="pt").pixel_values.to(device)
-            with torch.no_grad():
-                outputs = model.generate(
-                    pixel_values,
-                    max_length=3000,
-                    early_stopping=True,
-                )
-            # Decode the generated tokens
-            text = processor.batch_decode(outputs, skip_special_tokens=True)[0]
+            # predict() returns a string with the extracted text
+            text = model.predict(img)
             results.append(text)
         except Exception as e:
             logger.warning("Nougat extraction failed for image: %s", e)
